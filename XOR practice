@@ -1,0 +1,200 @@
+import binascii
+import string
+from itertools import cycle
+
+
+# ── Core XOR ─────────────────────────────────────────────────────────────────
+
+def xor_bytes(data: bytes, key: bytes) -> bytes:
+    """
+    XOR data with a repeating key. Works for both encrypt and decrypt.
+    This is the fundamental building block of XOR crypto.
+    """
+    return bytes(d ^ k for d, k in zip(data, cycle(key)))
+
+
+def xor_encrypt(plaintext: str, key: str) -> bytes:
+    """Encrypt string with string key. Returns raw cipher bytes."""
+    return xor_bytes(plaintext.encode(), key.encode())
+
+
+def xor_decrypt(cipher_bytes: bytes, key: str) -> str:
+    """Decrypt cipher bytes with string key. Returns plaintext string."""
+    return xor_bytes(cipher_bytes, key.encode()).decode()
+
+
+# ── Hex helpers (CTF standard) ────────────────────────────────────────────────
+
+def to_hex(data: bytes) -> str:
+    """Convert bytes → hex string (standard CTF format)."""
+    return binascii.hexlify(data).decode()
+
+
+def from_hex(hex_str: str) -> bytes:
+    """Convert hex string → bytes."""
+    return binascii.unhexlify(hex_str.replace(" ", "").replace("0x", ""))
+
+
+def xor_hex(hex1: str, hex2: str) -> str:
+    """
+    CTF ESSENTIAL: XOR two hex strings directly.
+    Common in CTFs: given two hex blobs, XOR them.
+    """
+    b1 = from_hex(hex1)
+    b2 = from_hex(hex2)
+    # Pad shorter one with null bytes
+    length = max(len(b1), len(b2))
+    b1 = b1.ljust(length, b'\x00')
+    b2 = b2.ljust(length, b'\x00')
+    return to_hex(bytes(a ^ b for a, b in zip(b1, b2)))
+
+
+# ── CTF Attack Tools ──────────────────────────────────────────────────────────
+
+def score_english(text: bytes) -> int:
+    """
+    Score how 'English-like' a byte sequence is.
+    Higher = more likely to be valid plaintext.
+    """
+    common = b' etaoinshrdlucmfywgpbvkxqjz'
+    try:
+        decoded = text.decode("utf-8", errors="ignore").lower()
+    except Exception:
+        return 0
+    return sum(1 for c in decoded.encode() if c in common)
+
+
+def brute_single_byte_xor(cipher_bytes: bytes) -> list[dict]:
+    """
+    CTF ESSENTIAL: Crack single-byte XOR by trying all 256 key bytes.
+    Returns results sorted by English score (best first).
+    """
+    results = []
+    for key_byte in range(256):
+        decrypted = bytes(b ^ key_byte for b in cipher_bytes)
+        score     = score_english(decrypted)
+        try:
+            text = decrypted.decode("utf-8")
+            results.append({
+                "key"     : key_byte,
+                "key_char": chr(key_byte) if 32 <= key_byte < 127 else "?",
+                "key_hex" : f"0x{key_byte:02x}",
+                "score"   : score,
+                "text"    : text
+            })
+        except UnicodeDecodeError:
+            pass
+    return sorted(results, key=lambda x: x["score"], reverse=True)
+
+
+def detect_xor_key_length(cipher_bytes: bytes, max_len: int = 40) -> list[dict]:
+    """
+    Guess XOR key length using normalized Hamming distance.
+    The key length with the smallest average distance is most likely correct.
+    (Used to crack repeating-key XOR — classic Cryptopals challenge)
+    """
+    def hamming(b1: bytes, b2: bytes) -> int:
+        return sum(bin(x ^ y).count('1') for x, y in zip(b1, b2))
+
+    results = []
+    for kl in range(2, min(max_len + 1, len(cipher_bytes) // 4)):
+        blocks   = [cipher_bytes[i*kl:(i+1)*kl] for i in range(4)]
+        pairs    = [(blocks[0], blocks[1]), (blocks[0], blocks[2]),
+                    (blocks[1], blocks[2]), (blocks[1], blocks[3])]
+        distances = [hamming(a, b) / kl for a, b in pairs if len(a) == kl and len(b) == kl]
+        if distances:
+            avg = sum(distances) / len(distances)
+            results.append({"key_length": kl, "normalized_distance": round(avg, 4)})
+
+    return sorted(results, key=lambda x: x["normalized_distance"])
+
+
+def crack_repeating_key_xor(cipher_bytes: bytes, key_length: int) -> bytes:
+    """
+    CTF ESSENTIAL: Crack repeating-key XOR (Cryptopals Set 1 Challenge 6).
+    Split into streams by key position, crack each with single-byte brute force.
+    """
+    key = b""
+    for i in range(key_length):
+        stream = bytes(cipher_bytes[j] for j in range(i, len(cipher_bytes), key_length))
+        best   = brute_single_byte_xor(stream)[0]
+        key   += bytes([best["key"]])
+    return key
+
+
+def known_plaintext_attack(cipher_bytes: bytes, known_plain: str) -> bytes:
+    """
+    CTF ESSENTIAL: If you know part of the plaintext (e.g. "flag{"),
+    XOR it with ciphertext to recover part of the key.
+    """
+    known = known_plain.encode()
+    key_part = bytes(c ^ p for c, p in zip(cipher_bytes, known))
+    return key_part
+
+
+# ── Demo ─────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("=" * 55)
+    print("       XOR ENCRYPTION — CTF TOOLKIT")
+    print("=" * 55)
+
+    # Basic encrypt / decrypt
+    flag   = "flag{xor_is_everywhere_in_ctf}"
+    key    = "mysecret"
+    cipher = xor_encrypt(flag, key)
+    hexout = to_hex(cipher)
+    plain  = xor_decrypt(cipher, key)
+
+    print(f"\n  Plaintext  : {flag}")
+    print(f"  Key        : {key}")
+    print(f"  Cipher hex : {hexout}")
+    print(f"  Decrypted  : {plain}")
+
+    # XOR two hex strings
+    print(f"\n  [XOR Two Hex Strings — common CTF task]")
+    h1 = "1c0111001f010100061a024b53535009181c"
+    h2 = "686974207468652062756c6c277320657965"
+    result = xor_hex(h1, h2)
+    print(f"  Hex 1   : {h1}")
+    print(f"  Hex 2   : {h2}")
+    print(f"  XOR     : {result}")
+    print(f"  Decoded : {from_hex(result).decode(errors='replace')}")
+
+    # Single-byte XOR brute force
+    print(f"\n  [Single-Byte XOR Brute Force]")
+    secret     = "Attack at dawn!"
+    key_byte   = 0x4B
+    cipher_sb  = bytes(b ^ key_byte for b in secret.encode())
+    print(f"  Ciphertext hex : {to_hex(cipher_sb)}")
+    top3 = brute_single_byte_xor(cipher_sb)[:3]
+    print("  Top 3 candidates:")
+    for r in top3:
+        mark = " ← correct!" if r["key"] == key_byte else ""
+        print(f"    key={r['key_hex']} ('{r['key_char']}') score={r['score']:3d} → {r['text']!r}{mark}")
+
+    # Repeating-key XOR crack (Cryptopals style)
+    print(f"\n  [Repeating-Key XOR Crack — Cryptopals Style]")
+    long_plain  = (
+        "burning 'em, if you ain't quick and nimble "
+        "i go crazy when i hear a cymbal and a high hat "
+        "with a souped up tempo i'm on a roll and it's time to go solo"
+    )
+    secret_key  = b"ICE"
+    cipher_rk   = xor_bytes(long_plain.encode(), secret_key)
+    print(f"  Ciphertext (hex, first 60): {to_hex(cipher_rk)[:60]}...")
+    top_kl = detect_xor_key_length(cipher_rk)[:3]
+    print(f"  Top key length guesses: {[r['key_length'] for r in top_kl]}")
+    recovered_key = crack_repeating_key_xor(cipher_rk, 3)
+    print(f"  Recovered key : {recovered_key}  (actual: {secret_key})")
+    print(f"  Decrypted     : {xor_bytes(cipher_rk, recovered_key).decode()[:50]}...")
+
+    # Known-plaintext attack
+    print(f"\n  [Known-Plaintext Attack]")
+    ctf_flag    = "flag{known_plain_attack}"
+    ctf_key     = "SECRETKEY"
+    ctf_cipher  = xor_encrypt(ctf_flag, ctf_key)
+    known       = "flag{"              # attacker knows flags start with this
+    partial_key = known_plaintext_attack(ctf_cipher, known)
+    print(f"  Known plaintext : {known!r}")
+    print(f"  Partial key     : {partial_key}")
+    print(f"  Key starts with : {partial_key.decode(errors='replace')}")
