@@ -1,0 +1,169 @@
+import string
+from collections import Counter
+
+
+# ── Core cipher ──────────────────────────────────────────────────────────────
+
+def encrypt(text: str, key: str) -> str:
+    """Encrypt using Vigenère cipher. Key repeats over the plaintext."""
+    key    = key.upper()
+    result = []
+    ki     = 0                         # key index (only advances on alpha chars)
+    for ch in text:
+        if ch.isalpha():
+            shift = ord(key[ki % len(key)]) - 65
+            base  = 65 if ch.isupper() else 97
+            result.append(chr((ord(ch) - base + shift) % 26 + base))
+            ki += 1
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+def decrypt(text: str, key: str) -> str:
+    """Decrypt Vigenère — reverse each key shift."""
+    key    = key.upper()
+    result = []
+    ki     = 0
+    for ch in text:
+        if ch.isalpha():
+            shift = ord(key[ki % len(key)]) - 65
+            base  = 65 if ch.isupper() else 97
+            result.append(chr((ord(ch) - base - shift) % 26 + base))
+            ki += 1
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+# ── CTF cracking tools ────────────────────────────────────────────────────────
+
+def index_of_coincidence(text: str) -> float:
+    """
+    IoC measures how 'uneven' letter distribution is.
+    English plaintext IoC ≈ 0.065
+    Random / encrypted text IoC ≈ 0.038
+    Use to confirm a guessed key length is correct.
+    """
+    text = [c for c in text.upper() if c.isalpha()]
+    n    = len(text)
+    if n < 2:
+        return 0.0
+    freq   = Counter(text)
+    ioc    = sum(f * (f - 1) for f in freq.values()) / (n * (n - 1))
+    return round(ioc, 4)
+
+
+def guess_key_length(ciphertext: str, max_len: int = 20) -> list[dict]:
+    """
+    Kasiski / IoC method: try key lengths 1–max_len.
+    Split ciphertext into 'key_len' streams, compute average IoC.
+    Key length with IoC closest to 0.065 = likely correct.
+    """
+    letters = [c.upper() for c in ciphertext if c.isalpha()]
+    results = []
+    for kl in range(1, max_len + 1):
+        streams = ["".join(letters[i::kl]) for i in range(kl)]
+        avg_ioc = sum(index_of_coincidence(s) for s in streams) / kl
+        results.append({"key_length": kl, "avg_ioc": round(avg_ioc, 4)})
+    return sorted(results, key=lambda x: abs(x["avg_ioc"] - 0.065))
+
+
+def crack_single_stream(stream: str) -> str:
+    """
+    For one stream (every nth character), find the Caesar shift
+    that makes it most English-like using frequency analysis.
+    English: E is most frequent letter.
+    """
+    freq        = Counter(c for c in stream.upper() if c.isalpha())
+    most_common = freq.most_common(1)[0][0]
+    shift       = (ord(most_common) - ord('E')) % 26
+    return chr(shift + 65)
+
+
+def crack_vigenere(ciphertext: str, key_length: int) -> str:
+    """
+    CTF ESSENTIAL: Given ciphertext and key length, recover the key
+    using frequency analysis on each character stream.
+    """
+    letters    = [c.upper() for c in ciphertext if c.isalpha()]
+    key_chars  = []
+    for i in range(key_length):
+        stream = "".join(letters[i::key_length])
+        key_chars.append(crack_single_stream(stream))
+    return "".join(key_chars)
+
+
+def full_crack(ciphertext: str, max_key_len: int = 15) -> dict:
+    """
+    Full automatic crack:
+    1. Guess key length via IoC
+    2. Recover key via frequency analysis
+    3. Decrypt
+    """
+    guesses    = guess_key_length(ciphertext, max_key_len)
+    best_kl    = guesses[0]["key_length"]
+    guessed_key = crack_vigenere(ciphertext, best_kl)
+    plaintext  = decrypt(ciphertext, guessed_key)
+    return {
+        "key_length"  : best_kl,
+        "guessed_key" : guessed_key,
+        "plaintext"   : plaintext,
+        "ioc"         : guesses[0]["avg_ioc"]
+    }
+
+
+# ── Demo ─────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("=" * 55)
+    print("       VIGENÈRE CIPHER — CTF TOOLKIT")
+    print("=" * 55)
+
+    # Basic encrypt / decrypt
+    plaintext = "Attack at dawn"
+    key       = "LEMON"
+    cipher    = encrypt(plaintext, key)
+    restored  = decrypt(cipher, key)
+
+    print(f"\n  Plaintext  : {plaintext}")
+    print(f"  Key        : {key}")
+    print(f"  Encrypted  : {cipher}")
+    print(f"  Decrypted  : {restored}")
+
+    # Show how the key repeats
+    print(f"\n  [How key repeats]")
+    print(f"  Plaintext : {plaintext.replace(' ', '')[:10].upper()}")
+    key_stream = (key * 10)[:10]
+    print(f"  Key stream: {key_stream}")
+    shifts = [ord(k) - 65 for k in key_stream]
+    print(f"  Shifts    : {shifts}")
+
+    # IoC demo
+    sample_plain  = "the quick brown fox jumps over the lazy dog" * 3
+    sample_cipher = encrypt(sample_plain, "SECRET")
+    print(f"\n  [Index of Coincidence]")
+    print(f"  Plaintext  IoC : {index_of_coincidence(sample_plain):.4f}  (English ≈ 0.065)")
+    print(f"  Ciphertext IoC : {index_of_coincidence(sample_cipher):.4f}  (random  ≈ 0.038)")
+
+    # Full auto-crack CTF scenario
+    long_plain  = (
+        "cryptography is the practice and study of techniques "
+        "for secure communication in the presence of adversaries "
+        "capture the flag challenges often use classical ciphers "
+        "as introductory problems to test your knowledge"
+    )
+    secret_key  = "FLAG"
+    ctf_cipher  = encrypt(long_plain, secret_key)
+
+    print(f"\n  [CTF Auto-Crack]")
+    print(f"  Ciphertext (first 60): {ctf_cipher[:60]}...")
+    result = full_crack(ctf_cipher)
+    print(f"  Guessed key length    : {result['key_length']}")
+    print(f"  Guessed key           : {result['guessed_key']}  (actual: {secret_key})")
+    print(f"  Cracked plaintext     : {result['plaintext'][:60]}...")
+
+    # Key length candidates
+    print(f"\n  [Top 5 key length candidates by IoC]")
+    for r in guess_key_length(ctf_cipher)[:5]:
+        mark = " ← best" if r == guess_key_length(ctf_cipher)[0] else ""
+        print(f"    key_len={r['key_length']:2d}  avg_IoC={r['avg_ioc']}{mark}")
