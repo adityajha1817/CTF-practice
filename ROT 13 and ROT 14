@@ -1,0 +1,81 @@
+import codecs
+import string
+
+
+def rot13(text: str) -> str:
+    """
+    Apply ROT13. Works for both encode AND decode (self-inverse).
+    This is the only function you need for ROT13.
+    """
+    table = str.maketrans(
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+        "NOPQRSTUVWXYZABCDEFGHIJKLMnopqrstuvwxyzabcdefghijklm"
+    )
+    return text.translate(table)
+
+
+def rot13_codecs(text: str) -> str:
+    """One-liner using Python's built-in codecs (identical result)."""
+    return codecs.encode(text, "rot_13")
+
+
+def rot47(text: str) -> str:
+    """
+    ROT47 — extends ROT13 to all printable ASCII (33–126).
+    Used in some CTF challenges. Self-inverse like ROT13.
+    """
+    return "".join(
+        chr(33 + (ord(ch) - 33 + 47) % 94) if 33 <= ord(ch) <= 126 else ch
+        for ch in text
+    )
+
+
+def detect_rot13(text: str) -> bool:
+    """
+    Heuristic: check if ROT13-decoding produces readable English.
+    Looks for common English words in the decoded output.
+    """
+    common_words = {"the", "is", "flag", "and", "to", "in", "you", "that", "it"}
+    decoded = rot13(text).lower()
+    words   = set(decoded.split())
+    matches = common_words & words
+    return len(matches) > 0
+
+# ── Demo ─────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("=" * 50)
+    print("          ROT13 — CTF TOOLKIT")
+    print("=" * 50)
+
+    # Basic usage
+    text    = "Hello, CTF Player!"
+    encoded = rot13(text)
+    decoded = rot13(encoded)          # applying twice restores original
+    print(f"\n  Original        : {text}")
+    print(f"  ROT13           : {encoded}")
+    print(f"  ROT13 again     : {decoded}  ← same as original ✓")
+    print(f"  codecs method   : {rot13_codecs(text)}")
+
+    # Self-inverse proof
+    print(f"\n  [Self-Inverse] A→{rot13('A')}  N→{rot13('N')}  Z→{rot13('Z')}")
+
+    # CTF scenario — flag hidden with ROT13
+    hidden_flag = rot13("flag{r0t13_is_3asy}")
+    print(f"\n  [CTF Challenge]")
+    print(f"  Hidden flag     : {hidden_flag}")
+    print(f"  Revealed        : {rot13(hidden_flag)}")
+
+    # ROT47 demo
+    secret = "flag{secret_stuff_123!}"
+    r47    = rot47(secret)
+    print(f"\n  [ROT47 — covers digits & symbols too]")
+    print(f"  Original        : {secret}")
+    print(f"  ROT47           : {r47}")
+    print(f"  ROT47 again     : {rot47(r47)}  ← restored ✓")
+
+    # Auto-detect
+    maybe_rot13 = rot13("gur synt vf urer")
+    print(f"\n  [Auto-detect ROT13?]")
+    print(f"  Input           : gur synt vf urer")
+    print(f"  Looks like ROT13: {detect_rot13('gur synt vf urer')}")
+    print(f"  Decoded         : {maybe_rot13}")
