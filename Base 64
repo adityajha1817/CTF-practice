@@ -1,0 +1,157 @@
+import base64
+import binascii
+
+
+# ── Core encode / decode ──────────────────────────────────────────────────────
+
+def b64_encode(text: str) -> str:
+    """Encode a string to standard Base64."""
+    return base64.b64encode(text.encode()).decode()
+
+
+def b64_decode(encoded: str) -> str:
+    """Decode a Base64 string. Raises ValueError on invalid input."""
+    try:
+        return base64.b64decode(encoded.encode()).decode()
+    except Exception as e:
+        raise ValueError(f"Invalid Base64: {e}")
+
+
+def b64_encode_bytes(data: bytes) -> str:
+    """Encode raw bytes to Base64 (useful for binary files / images)."""
+    return base64.b64encode(data).decode()
+
+
+def b64_decode_bytes(encoded: str) -> bytes:
+    """Decode Base64 back to raw bytes."""
+    return base64.b64decode(encoded.encode())
+
+
+# ── URL-safe Base64 (used in JWTs) ───────────────────────────────────────────
+
+def b64_url_encode(text: str) -> str:
+    """URL-safe Base64: replaces + → - and / → _ (no padding issues in URLs)."""
+    return base64.urlsafe_b64encode(text.encode()).decode()
+
+
+def b64_url_decode(encoded: str) -> str:
+    """Decode URL-safe Base64. Adds missing padding automatically."""
+    padded = encoded + "=" * (-len(encoded) % 4)   # fix missing padding
+    return base64.urlsafe_b64decode(padded.encode()).decode()
+
+
+# ── CTF tools ─────────────────────────────────────────────────────────────────
+
+def is_base64(s: str) -> bool:
+    """
+    Heuristic check: is this string likely Base64 encoded?
+    Looks at character set and length.
+    """
+    import re
+    s = s.strip()
+    # Standard Base64 alphabet + padding
+    if not re.fullmatch(r'[A-Za-z0-9+/]*={0,2}', s):
+        return False
+    return len(s) % 4 == 0
+
+
+def decode_layers(encoded: str, max_layers: int = 10) -> list[dict]:
+    """
+    CTF ESSENTIAL: Repeatedly decode Base64 until it fails or plaintext found.
+    Some CTFs encode the flag multiple times (Base64 of Base64 of Base64...).
+    Returns list of each layer's result.
+    """
+    results = []
+    current = encoded.strip()
+    for layer in range(1, max_layers + 1):
+        try:
+            decoded = base64.b64decode(current.encode()).decode("utf-8")
+            results.append({"layer": layer, "decoded": decoded})
+            current = decoded.strip()
+        except Exception:
+            break
+    return results
+
+
+def b64_to_hex(encoded: str) -> str:
+    """Convert Base64 → hex string. Common CTF conversion."""
+    raw = base64.b64decode(encoded.encode())
+    return binascii.hexlify(raw).decode()
+
+
+def hex_to_b64(hex_str: str) -> str:
+    """Convert hex → Base64. Common CTF conversion."""
+    raw = binascii.unhexlify(hex_str)
+    return base64.b64encode(raw).decode()
+
+
+def decode_jwt_payload(token: str) -> str:
+    """
+    Decode the payload section of a JWT (middle part between dots).
+    JWTs use URL-safe Base64 WITHOUT padding.
+    """
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError("Not a valid JWT (expected 3 dot-separated parts)")
+    payload = parts[1]
+    padded  = payload + "=" * (-len(payload) % 4)
+    decoded = base64.urlsafe_b64decode(padded.encode()).decode()
+    return decoded
+
+
+# ── Demo ─────────────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("=" * 55)
+    print("          BASE64 — CTF TOOLKIT")
+    print("=" * 55)
+
+    # Basic encode / decode
+    flag = "flag{base64_is_not_encryption}"
+    enc  = b64_encode(flag)
+    dec  = b64_decode(enc)
+    print(f"\n  Original   : {flag}")
+    print(f"  Encoded    : {enc}")
+    print(f"  Decoded    : {dec}")
+
+    # Is it Base64?
+    samples = [enc, "hello world", "SGVsbG8=", "not_b64!!"]
+    print(f"\n  [Base64 Detection]")
+    for s in samples:
+        print(f"    {s!r:35s} → {is_base64(s)}")
+
+    # Multi-layer decode (CTF scenario)
+    print(f"\n  [Multi-Layer Decode]")
+    original    = "flag{double_encoded}"
+    layer1      = b64_encode(original)
+    layer2      = b64_encode(layer1)
+    layer3      = b64_encode(layer2)
+    print(f"  Original  : {original}")
+    print(f"  3x encoded: {layer3}")
+    print(f"  Peeling layers:")
+    for r in decode_layers(layer3):
+        print(f"    Layer {r['layer']}: {r['decoded']}")
+
+    # Base64 ↔ Hex
+    print(f"\n  [Base64 ↔ Hex Conversion]")
+    b64   = b64_encode("CTF")
+    hexed = b64_to_hex(b64)
+    back  = hex_to_b64(hexed)
+    print(f"  'CTF' → Base64 : {b64}")
+    print(f"  Base64 → Hex   : {hexed}")
+    print(f"  Hex → Base64   : {back}")
+
+    # JWT decode
+    print(f"\n  [JWT Payload Decode]")
+    import json
+    header  = b64_url_encode('{"alg":"HS256","typ":"JWT"}').rstrip("=")
+    payload = b64_url_encode('{"user":"admin","flag":"flag{jwt_hacking}"}').rstrip("=")
+    fake_jwt = f"{header}.{payload}.fakesignature"
+    print(f"  JWT      : {fake_jwt[:60]}...")
+    print(f"  Payload  : {decode_jwt_payload(fake_jwt)}")
+
+    # URL-safe Base64
+    print(f"\n  [URL-safe Base64]")
+    url_enc = b64_url_encode("user:pass@ctf.example.com")
+    url_dec = b64_url_decode(url_enc)
+    print(f"  Encoded  : {url_enc}")
+    print(f"  Decoded  : {url_dec}")
